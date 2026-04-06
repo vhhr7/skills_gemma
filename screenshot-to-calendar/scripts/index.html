@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+</head>
+<body>
+<script>
+  /**
+   * Formats YYYY-MM-DD + HH:MM into Google Calendar format: YYYYMMDDTHHmmSS
+   */
+  function formatDateTime(date, time) {
+    const d = date.replace(/-/g, "");
+    const t = time.replace(":", "") + "00";
+    return `${d}T${t}`;
+  }
+
+  /**
+   * Generates an ICS file content string for Apple Calendar import.
+   */
+  function generateICS(title, startDT, endDT, location, description) {
+    const now = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15) + "Z";
+    const uid = `${now}-${Math.random().toString(36).slice(2)}@screenshot-to-calendar`;
+    return [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//screenshot-to-calendar//EN",
+      "BEGIN:VEVENT",
+      `UID:${uid}`,
+      `DTSTAMP:${now}`,
+      `DTSTART:${startDT}`,
+      `DTEND:${endDT}`,
+      `SUMMARY:${title}`,
+      location ? `LOCATION:${location}` : "",
+      description ? `DESCRIPTION:${description}` : "",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ]
+      .filter(line => line !== "")
+      .join("\r\n");
+  }
+
+  window["ai_edge_gallery_get_result"] = async (data, secret) => {
+    try {
+      const ev = JSON.parse(data);
+
+      const { title, start_date, start_time, end_date, end_time, location, description } = ev;
+
+      // Validate required fields
+      if (!title || !start_date || !start_time) {
+        return JSON.stringify({ error: "Faltan datos del evento: se requiere título, fecha y hora de inicio." });
+      }
+
+      const startDT = formatDateTime(start_date, start_time);
+      const endDT   = formatDateTime(end_date   || start_date, end_time || start_time);
+
+      // Build Google Calendar URL
+      const params = new URLSearchParams({
+        text:     title,
+        dates:    `${startDT}/${endDT}`,
+        details:  description || "",
+        location: location    || "",
+      });
+
+      // If a calendar ID was provided as secret, add calid param
+      const calId = (secret || "").trim();
+      if (calId) params.append("calid", calId);
+
+      const gcalUrl = `https://calendar.google.com/calendar/r/eventedit?${params.toString()}`;
+
+      // Build ICS base64 for Apple Calendar
+      const icsContent = generateICS(title, startDT, endDT, location || "", description || "");
+      const icsBase64  = btoa(unescape(encodeURIComponent(icsContent)));
+
+      // Pass everything to webview via URL params
+      const webviewParams = new URLSearchParams({
+        title:    title,
+        start:    `${start_date} ${start_time}`,
+        end:      `${end_date || start_date} ${end_time || start_time}`,
+        location: location    || "",
+        description: description || "",
+        gcalUrl:  gcalUrl,
+        icsBase64: icsBase64,
+      });
+
+      return JSON.stringify({
+        result: `Evento listo: "${title}" el ${start_date} a las ${start_time}.`,
+        webview: {
+          url: `webview.html?${webviewParams.toString()}`,
+          aspectRatio: 1.4,
+        },
+      });
+
+    } catch (e) {
+      console.error(e);
+      return JSON.stringify({ error: `Error procesando el evento: ${e.message}` });
+    }
+  };
+</script>
+</body>
+</html>
